@@ -72,6 +72,8 @@ Copy `.env.example` to `.env` for deployment or local process configuration.
 - `OPENAI_API_KEY` / `OPENAI_MODEL`: optional. Used if Groq is not configured or fails.
 - `PORT`: backend port. Defaults to `8000`.
 - `VITE_API_BASE`: frontend build-time API base URL.
+- `SESSION_MAX_AGE_DAYS`: how long a session cookie stays valid. Defaults to `7`.
+- `RATE_LIMIT_WINDOW_SECONDS` / `RATE_LIMIT_MAX_ATTEMPTS`: login/signup rate limit window and cap. Defaults to `300` seconds / `8` attempts.
 
 ## Architecture
 
@@ -89,9 +91,17 @@ to match the frontend's existing error handling.
 
 Tables (`users`, `sessions`, `orders`, `payments`, `explanations`) are scoped by `user_id`, so users
 only see their own imports and explanation cache entries. Authentication uses PBKDF2-HMAC-SHA256
-password hashing, random server-side sessions, and HMAC-signed HTTP-only cookies.
+password hashing, random server-side sessions, and HMAC-signed HTTP-only cookies. Sessions expire
+after `SESSION_MAX_AGE_DAYS` (default 7) — checked and the row deleted on read, so a stale or stolen
+cookie stops working instead of being valid forever. `/api/login` and `/api/signup` are rate-limited
+per IP+email (in-memory sliding window, `RATE_LIMIT_MAX_ATTEMPTS` per `RATE_LIMIT_WINDOW_SECONDS`) to
+slow down credential stuffing; this is process-local, so a multi-instance deployment would need a
+shared store (Redis) instead. `/api/explain` treats the client-supplied row list as untrusted input:
+it cross-checks every row against that user's current server-computed reconciliation and drops
+anything that doesn't match a real discrepancy before it reaches the LLM prompt, rather than trusting
+whatever the request body contains.
 
-The frontend is a Vite React app written in TypeScript. It uses small local shadcn-style primitives for buttons, cards, inputs, selects, and badges, plus Lucide icons. The dashboard includes headline metrics, risk-by-type bars, upload state, filters, search, a discrepancy table, and LLM loading/error states.
+The frontend is a Vite React app written in TypeScript. It uses small local shadcn-style primitives for buttons, cards, inputs, selects, and badges, plus Lucide icons. The dashboard includes headline metrics, a risk-by-type chart, a severity-breakdown chart (both clickable to filter the drill-down table, with removable filter chips), upload state, search, a discrepancy table, and LLM loading/error states. A failed `/api/dashboard` fetch shows an explicit error with a Retry action instead of spinning forever.
 
 ## Reconciliation Logic
 
@@ -114,6 +124,9 @@ Discrepancy types implemented:
 - `orphan_refund`: refund references an order missing from the order export.
 - `duplicate_order_id`: order export contains repeated order IDs.
 - `duplicate_transaction_ref`: payment export contains repeated transaction references.
+- `unexpected_status`: order status is outside the recognized set (`completed`, `cancelled`/`canceled`,
+  `refunded`, `returned`). Flagged at `medium` severity instead of being silently skipped, so an
+  unfamiliar export value can't make an order vanish from both the reconciled and disputed totals.
 
 `amount_at_risk` is the amount that should be investigated first, usually the absolute expected-versus-actual difference. Critical issues include missing money, duplicate captures, currency mismatches, orphan charges, and cancelled-order captures.
 
@@ -167,9 +180,12 @@ AI assistance was used to generate and iterate on the implementation. The determ
 
 ## What I Would Improve Next
 
-- Add Playwright coverage for auth, import, filtering, and explanation states.
+- Add Playwright coverage for auth, import, filtering, and explanation states (verified these manually
+  with a scripted Playwright run while building this, but there's no committed automated suite yet).
+- Move the rate limiter from in-memory to a shared store (Redis) before running more than one backend
+  instance, since the current sliding window is per-process.
+- Add a "logout everywhere" action that revokes all of a user's sessions, not just the current one.
 - Preserve raw imported rows alongside normalized fields for audit trails.
 - Add downloadable discrepancy reports.
-- Add a provider-specific deployment config once hosting is selected.
 - Move repositories from a connection-per-query pattern to a request-scoped connection or pool.
 
