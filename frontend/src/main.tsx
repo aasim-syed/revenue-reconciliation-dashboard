@@ -5,58 +5,8 @@ import { api } from "./lib/api";
 import type { Dashboard, Discrepancy, Explanation, User } from "./lib/types";
 import { currency, labelize } from "./lib/utils";
 import { Badge, Button, Card, Input, Select } from "./components/ui";
+import { HeroAuthScreen } from "./components/hero-auth";
 import "./styles.css";
-
-type View = "login" | "signup";
-
-function AuthScreen({ onAuthed }: { onAuthed: (user: User) => void }) {
-  const [view, setView] = React.useState<View>("login");
-  const [email, setEmail] = React.useState("demo@example.com");
-  const [password, setPassword] = React.useState("password123");
-  const [error, setError] = React.useState("");
-  const [loading, setLoading] = React.useState(false);
-
-  async function submit(event: React.FormEvent) {
-    event.preventDefault();
-    setLoading(true);
-    setError("");
-    try {
-      const result = view === "login" ? await api.login(email, password) : await api.signup(email, password);
-      onAuthed(result.user);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Authentication failed");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  return (
-    <main className="auth-shell">
-      <section className="auth-copy">
-        <div className="mark"><ShieldCheck size={28} /></div>
-        <h1>Revenue Audit</h1>
-        <p>Upload order and payment exports, reconcile mismatches, and focus the finance review on the records that actually put money at risk.</p>
-        <div className="auth-points">
-          <span>Deterministic matching</span>
-          <span>Per-user imports</span>
-          <span>Backend LLM summaries</span>
-        </div>
-      </section>
-      <Card className="auth-card">
-        <div className="segmented" role="tablist">
-          <button className={view === "login" ? "active" : ""} onClick={() => setView("login")}>Log in</button>
-          <button className={view === "signup" ? "active" : ""} onClick={() => setView("signup")}>Sign up</button>
-        </div>
-        <form onSubmit={submit}>
-          <label>Email<Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required /></label>
-          <label>Password<Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} minLength={8} required /></label>
-          {error && <p className="form-error"><AlertCircle size={16} />{error}</p>}
-          <Button disabled={loading}>{loading && <Loader2 className="spin" size={16} />}{view === "login" ? "Log in" : "Create account"}</Button>
-        </form>
-      </Card>
-    </main>
-  );
-}
 
 function ImportPanel({ onImported }: { onImported: (dashboard: Dashboard) => void }) {
   const [orders, setOrders] = React.useState<File | null>(null);
@@ -247,7 +197,7 @@ function App() {
   }
 
   if (booting) return <main className="loading"><Loader2 className="spin" />Starting workspace</main>;
-  if (!user) return <AuthScreen onAuthed={onAuthed} />;
+  if (!user) return <HeroAuthScreen onAuthed={onAuthed} />;
   return <DashboardScreen user={user} dashboard={dashboard} setDashboard={setDashboard} onLogout={logout} />;
 }
 
