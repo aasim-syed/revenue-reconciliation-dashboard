@@ -19,11 +19,28 @@ import cgi
 
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = os.environ.get("DATABASE_PATH", str(BASE_DIR / "revenue_audit.db"))
+DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
+USE_POSTGRES = bool(DATABASE_URL)
 APP_SECRET = os.environ.get("APP_SECRET", "dev-secret-change-me")
 FRONTEND_ORIGIN = os.environ.get("FRONTEND_ORIGIN", "http://127.0.0.1:5173")
-ALLOWED_ORIGINS = {FRONTEND_ORIGIN, "http://127.0.0.1:5173", "http://localhost:5173"}
+EXTRA_ORIGINS = {o.strip() for o in os.environ.get("EXTRA_ALLOWED_ORIGINS", "").split(",") if o.strip()}
+ALLOWED_ORIGINS = {FRONTEND_ORIGIN, "http://127.0.0.1:5173", "http://localhost:5173"} | EXTRA_ORIGINS
 SESSION_COOKIE = "audit_session"
 AMOUNT_TOLERANCE = Decimal("0.01")
+# Cross-origin deployments (separate frontend/backend hosts) need SameSite=None; Secure
+# for the browser to send the session cookie on credentialed fetches. Local dev stays on
+# plain http, so it keeps SameSite=Lax without Secure. Derived from FRONTEND_ORIGIN's
+# scheme rather than a second env var, since the two must already agree.
+COOKIE_SECURE = FRONTEND_ORIGIN.startswith("https://")
+
+if USE_POSTGRES:
+    import psycopg2
+    import psycopg2.extras
+
+    IntegrityError = psycopg2.IntegrityError
+else:
+    class IntegrityError(Exception):
+        """Never raised in SQLite mode; sqlite3.IntegrityError is used instead."""
 
 
 def load_dotenv(path):
@@ -65,64 +82,150 @@ def parse_dt(value):
     return raw
 
 
+class PgConnection:
+    """Wraps a psycopg2 connection so callers can keep using '?' placeholders,
+    dict-like rows, and a sqlite3-style context manager (commit-or-rollback then close)."""
+
+    def __init__(self, conn):
+        self._conn = conn
+
+    def execute(self, sql, params=()):
+        cur = self._conn.cursor()
+        cur.execute(sql.replace("?", "%s"), params)
+        return cur
+
+    def executemany(self, sql, seq):
+        cur = self._conn.cursor()
+        cur.executemany(sql.replace("?", "%s"), seq)
+        return cur
+
+    def executescript(self, sql):
+        cur = self._conn.cursor()
+        cur.execute(sql)
+        return cur
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        if exc_type is None:
+            self._conn.commit()
+        else:
+            self._conn.rollback()
+        self._conn.close()
+        return False
+
+
 def connect():
+    if USE_POSTGRES:
+        conn = psycopg2.connect(DATABASE_URL, cursor_factory=psycopg2.extras.RealDictCursor)
+        return PgConnection(conn)
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
 
 
+SQLITE_SCHEMA = """
+CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    email TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS sessions (
+    token TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS orders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    order_id TEXT NOT NULL,
+    order_date TEXT,
+    customer_email TEXT,
+    currency TEXT,
+    gross_amount TEXT,
+    discount TEXT,
+    net_amount TEXT,
+    status TEXT,
+    imported_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS payments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    transaction_ref TEXT NOT NULL,
+    processed_at TEXT,
+    order_reference TEXT,
+    currency TEXT,
+    amount TEXT,
+    fee TEXT,
+    net_settled TEXT,
+    type TEXT,
+    status TEXT,
+    imported_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS explanations (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    fingerprint TEXT NOT NULL,
+    content TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (user_id, fingerprint)
+);
+"""
+
+POSTGRES_SCHEMA = """
+CREATE TABLE IF NOT EXISTS users (
+    id SERIAL PRIMARY KEY,
+    email TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS sessions (
+    token TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS orders (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    order_id TEXT NOT NULL,
+    order_date TEXT,
+    customer_email TEXT,
+    currency TEXT,
+    gross_amount TEXT,
+    discount TEXT,
+    net_amount TEXT,
+    status TEXT,
+    imported_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS payments (
+    id SERIAL PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    transaction_ref TEXT NOT NULL,
+    processed_at TEXT,
+    order_reference TEXT,
+    currency TEXT,
+    amount TEXT,
+    fee TEXT,
+    net_settled TEXT,
+    type TEXT,
+    status TEXT,
+    imported_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS explanations (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    fingerprint TEXT NOT NULL,
+    content TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (user_id, fingerprint)
+);
+"""
+
+
 def init_db():
     with connect() as db:
-        db.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                email TEXT NOT NULL UNIQUE,
-                password_hash TEXT NOT NULL,
-                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-            );
-            CREATE TABLE IF NOT EXISTS sessions (
-                token TEXT PRIMARY KEY,
-                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-            );
-            CREATE TABLE IF NOT EXISTS orders (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                order_id TEXT NOT NULL,
-                order_date TEXT,
-                customer_email TEXT,
-                currency TEXT,
-                gross_amount TEXT,
-                discount TEXT,
-                net_amount TEXT,
-                status TEXT,
-                imported_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-            );
-            CREATE TABLE IF NOT EXISTS payments (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                transaction_ref TEXT NOT NULL,
-                processed_at TEXT,
-                order_reference TEXT,
-                currency TEXT,
-                amount TEXT,
-                fee TEXT,
-                net_settled TEXT,
-                type TEXT,
-                status TEXT,
-                imported_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-            );
-            CREATE TABLE IF NOT EXISTS explanations (
-                user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                fingerprint TEXT NOT NULL,
-                content TEXT NOT NULL,
-                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                PRIMARY KEY (user_id, fingerprint)
-            );
-            """
-        )
+        db.executescript(POSTGRES_SCHEMA if USE_POSTGRES else SQLITE_SCHEMA)
 
 
 def hash_password(password, salt=None):
@@ -341,50 +444,114 @@ def render_llm_json(parsed):
     return {"summary": summary, "likely_causes": causes[:5], "recommended_actions": actions[:5]}
 
 
+def humanize(value):
+    return str(value or "").replace("_", " ").strip()
+
+
+def deterministic_explanation(rows, prefix=None):
+    selected = rows[:12]
+    if not selected:
+        summary = "No discrepancies are visible in the current view."
+        if prefix:
+            summary = f"{prefix} {summary}"
+        return {"summary": summary, "likely_causes": [], "recommended_actions": []}
+
+    total_risk = sum((money(row.get("amount_at_risk")) for row in selected), Decimal("0.00"))
+    by_type = Counter(row.get("type", "unknown") for row in selected)
+    by_severity = Counter(row.get("severity", "unknown") for row in selected)
+    top_type, top_count = by_type.most_common(1)[0]
+    critical_count = by_severity.get("critical", 0)
+    high_count = by_severity.get("high", 0)
+    summary = (
+        f"Current view contains {len(selected)} discrepancy records with {money(total_risk)} at risk. "
+        f"The most common issue is {humanize(top_type)} ({top_count} records), with "
+        f"{critical_count} critical and {high_count} high-priority records in scope."
+    )
+    if prefix:
+        summary = f"{prefix} {summary}"
+
+    causes = []
+    for dtype, _ in by_type.most_common(5):
+        notes = [row.get("note", "") for row in selected if row.get("type") == dtype and row.get("note")]
+        cause = notes[0] if notes else f"{humanize(dtype).capitalize()} appears in the filtered records."
+        causes.append(f"{humanize(dtype).capitalize()}: {cause}")
+
+    actions = [
+        "Start with critical records and the largest amount-at-risk values.",
+        "Compare each affected order against the payment processor timeline before issuing refunds or capture adjustments.",
+        "Export or save the filtered discrepancy list as the audit work queue for finance review.",
+    ]
+    if any(row.get("type") in {"duplicate_charge", "overpaid", "charged_cancelled_order"} for row in selected):
+        actions.insert(1, "Prioritize customer-impacting overcollection issues before revenue leakage items.")
+    if any(row.get("type") in {"missing_payment", "underpaid", "unsettled_payment"} for row in selected):
+        actions.insert(1, "Verify fulfillment status before retrying collection or contacting customers.")
+
+    return {"summary": summary, "likely_causes": causes, "recommended_actions": actions[:5]}
+
+
 def explain_with_llm(user_id, rows):
     selected = rows[:12]
     fp = fingerprint(selected)
     with connect() as db:
         cached = db.execute("SELECT content FROM explanations WHERE user_id = ? AND fingerprint = ?", (user_id, fp)).fetchone()
         if cached:
-            return json.loads(cached["content"]), True
+            content = json.loads(cached["content"])
+            summary = str(content.get("summary", ""))
+            stale_error = "explanation service returned" in summary.lower() or "http error 403" in summary.lower()
+            if not stale_error:
+                return content, True
+            db.execute("DELETE FROM explanations WHERE user_id = ? AND fingerprint = ?", (user_id, fp))
     groq_key = os.environ.get("GROQ_API_KEY", "").strip()
     openai_key = os.environ.get("OPENAI_API_KEY", "").strip()
+    providers = []
     if groq_key:
-        api_key = groq_key
-        endpoint = os.environ.get("GROQ_CHAT_COMPLETIONS_URL", "https://api.groq.com/openai/v1/chat/completions")
-        model = os.environ.get("GROQ_MODEL", "openai/gpt-oss-20b")
-        provider = "Groq"
-    elif openai_key:
-        api_key = openai_key
-        endpoint = "https://api.openai.com/v1/chat/completions"
-        model = os.environ.get("OPENAI_MODEL", "gpt-4.1-mini")
-        provider = "OpenAI"
-    else:
-        return {"summary": "LLM explanations are not configured. Set GROQ_API_KEY or OPENAI_API_KEY on the backend to enable this feature.", "likely_causes": [], "recommended_actions": []}, False
-    body = {
-        "model": model,
-        "temperature": 0.2,
-        "response_format": {"type": "json_object"},
-        "messages": [
-            {"role": "system", "content": f"You explain deterministic revenue reconciliation results using {provider}. Return JSON with keys summary, likely_causes, recommended_actions. Do not change classifications or amounts."},
-            {"role": "user", "content": json.dumps({"discrepancies": selected}, indent=2)},
-        ],
-    }
-    req = urllib.request.Request(endpoint, data=json.dumps(body).encode(), headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json", "User-Agent": "revenue-audit-local-dev/1.0"}, method="POST")
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            payload = json.loads(resp.read().decode())
-        parsed = render_llm_json(json.loads(payload["choices"][0]["message"]["content"]))
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode(errors="replace")[:800]
-        parsed = {"summary": f"The explanation service returned HTTP {exc.code}. Deterministic results are still available. Provider response: {detail}", "likely_causes": [], "recommended_actions": []}
-    except (urllib.error.URLError, KeyError, IndexError, json.JSONDecodeError, TimeoutError) as exc:
-        parsed = {"summary": f"The explanation service returned an unusable response. Deterministic results are still available. Error: {exc}", "likely_causes": [], "recommended_actions": []}
-    with connect() as db:
-        db.execute("INSERT OR REPLACE INTO explanations (user_id, fingerprint, content) VALUES (?, ?, ?)", (user_id, fp, json.dumps(parsed)))
-    return parsed, False
+        providers.append({
+            "api_key": groq_key,
+            "endpoint": os.environ.get("GROQ_CHAT_COMPLETIONS_URL", "https://api.groq.com/openai/v1/chat/completions"),
+            "model": os.environ.get("GROQ_MODEL", "llama-3.1-8b-instant"),
+            "name": "Groq",
+        })
+    if openai_key:
+        providers.append({
+            "api_key": openai_key,
+            "endpoint": "https://api.openai.com/v1/chat/completions",
+            "model": os.environ.get("OPENAI_MODEL", "gpt-4.1-mini"),
+            "name": "OpenAI",
+        })
+    if not providers:
+        return deterministic_explanation(selected, "AI explanations are not configured; showing a deterministic summary."), False
 
+    for provider in providers:
+        body = {
+            "model": provider["model"],
+            "temperature": 0.2,
+            "response_format": {"type": "json_object"},
+            "messages": [
+                {"role": "system", "content": f"You explain deterministic revenue reconciliation results using {provider['name']}. Return JSON with keys summary, likely_causes, recommended_actions. Do not change classifications or amounts."},
+                {"role": "user", "content": json.dumps({"discrepancies": selected}, indent=2)},
+            ],
+        }
+        req = urllib.request.Request(provider["endpoint"], data=json.dumps(body).encode(), headers={"Authorization": f"Bearer {provider['api_key']}", "Content-Type": "application/json", "User-Agent": "revenue-audit-local-dev/1.0"}, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                payload = json.loads(resp.read().decode())
+            parsed = render_llm_json(json.loads(payload["choices"][0]["message"]["content"]))
+            with connect() as db:
+                if USE_POSTGRES:
+                    db.execute(
+                        """
+                        INSERT INTO explanations (user_id, fingerprint, content) VALUES (?, ?, ?)
+                        ON CONFLICT (user_id, fingerprint) DO UPDATE SET content = EXCLUDED.content
+                        """,
+                        (user_id, fp, json.dumps(parsed)),
+                    )
+                else:
+                    db.execute("INSERT OR REPLACE INTO explanations (user_id, fingerprint, content) VALUES (?, ?, ?)", (user_id, fp, json.dumps(parsed)))
+            return parsed, False
+        except (urllib.error.HTTPError, urllib.error.URLError, KeyError, IndexError, json.JSONDecodeError, TimeoutError, ValueError):
+            continue
+
+    return deterministic_explanation(selected, "AI explanation is temporarily unavailable; showing a deterministic summary."), False
 
 class Handler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):
@@ -442,9 +609,13 @@ class Handler(BaseHTTPRequestHandler):
         with connect() as db:
             if path == "/api/signup":
                 try:
-                    cur = db.execute("INSERT INTO users (email, password_hash) VALUES (?, ?)", (email, hash_password(password)))
-                    user_id = cur.lastrowid
-                except sqlite3.IntegrityError:
+                    if USE_POSTGRES:
+                        cur = db.execute("INSERT INTO users (email, password_hash) VALUES (?, ?) RETURNING id", (email, hash_password(password)))
+                        user_id = cur.fetchone()["id"]
+                    else:
+                        cur = db.execute("INSERT INTO users (email, password_hash) VALUES (?, ?)", (email, hash_password(password)))
+                        user_id = cur.lastrowid
+                except (sqlite3.IntegrityError, IntegrityError):
                     self.json({"error": "That email is already registered."}, 409)
                     return
             else:
@@ -518,7 +689,9 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         if cookie_value is not None:
-            cookie = f"{SESSION_COOKIE}={cookie_value}; Path=/; HttpOnly; SameSite=Lax"
+            cookie = f"{SESSION_COOKIE}={cookie_value}; Path=/; HttpOnly; SameSite={'None' if COOKIE_SECURE else 'Lax'}"
+            if COOKIE_SECURE:
+                cookie += "; Secure"
             if max_age is not None:
                 cookie += f"; Max-Age={max_age}"
             self.send_header("Set-Cookie", cookie)
@@ -539,5 +712,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-

@@ -1,1 +1,4 @@
-# This project intentionally uses only the Python standard library.
+# Core app logic uses only the Python standard library.
+# psycopg2-binary is only imported when DATABASE_URL is set (production Postgres);
+# local dev and the smoke test default to SQLite and need no extra packages.
+psycopg2-binary

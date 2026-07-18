@@ -40,10 +40,12 @@ npm run build
 Copy `.env.example` to `.env` for deployment or local process configuration.
 
 - `APP_SECRET`: long random value used to sign session cookies.
-- `DATABASE_PATH`: SQLite file path. Defaults to `./backend/revenue_audit.db`.
-- `FRONTEND_ORIGIN`: allowed browser origin for credentialed CORS.
-- `OPENAI_API_KEY`: optional. Enables discrepancy explanations.
-- `OPENAI_MODEL`: optional. Defaults to `gpt-4.1-mini`.
+- `DATABASE_PATH`: SQLite file path, used when `DATABASE_URL` is not set. Defaults to `./backend/revenue_audit.db`.
+- `DATABASE_URL`: optional Postgres connection string (e.g. a Neon project). When set, the backend uses Postgres instead of SQLite. Local dev and the smoke test leave this unset and use SQLite.
+- `FRONTEND_ORIGIN`: allowed browser origin for credentialed CORS. Also controls the session cookie: an `https://` value switches it to `SameSite=None; Secure` for cross-origin deployments, otherwise it stays `SameSite=Lax` for local http dev.
+- `EXTRA_ALLOWED_ORIGINS`: optional comma-separated extra origins to allow (rarely needed).
+- `GROQ_API_KEY` / `GROQ_MODEL`: optional. Tried first for discrepancy explanations.
+- `OPENAI_API_KEY` / `OPENAI_MODEL`: optional. Used if Groq is not configured or fails.
 - `PORT`: backend port. Defaults to `8000`.
 - `VITE_API_BASE`: frontend build-time API base URL.
 
@@ -113,13 +115,20 @@ Business meaning: the store has both revenue leakage and customer-risk issues. M
 
 The LLM explains deterministic results only. It never decides matches, classifications, severities, or amounts.
 
-The backend sends the currently filtered discrepancy rows to Groq when `GROQ_API_KEY` is present, otherwise to OpenAI when `OPENAI_API_KEY` is present. It asks for JSON with `summary`, `likely_causes`, and `recommended_actions`. Temperature is `0.2` because the output should be stable and operational. The backend requests JSON output, validates the shape defensively, handles malformed responses and network failures, and returns a clear fallback when no API key is configured.
+The backend sends the currently filtered discrepancy rows (capped at 12) to Groq when `GROQ_API_KEY` is present, falling back to OpenAI if Groq is not configured or its call fails. It asks for JSON with `summary`, `likely_causes`, and `recommended_actions`. Temperature is `0.2` because the output should be stable and operational, not creative. The backend requests JSON output, validates the shape defensively (`render_llm_json`), and handles malformed responses, non-2xx responses, and network failures by falling through to the next provider.
 
-Explanations are cached per user using a SHA-256 fingerprint of the selected discrepancy rows.
+If no provider is configured, or every provider call fails, the backend returns a **deterministic, locally-computed explanation** (`deterministic_explanation`) built from the same rows — counts by type/severity and the largest amounts at risk — so the dashboard never shows a dead end, and it's obvious from the wording that it's a fallback rather than a model-generated explanation.
+
+Explanations are cached per user using a SHA-256 fingerprint of the selected discrepancy rows; a cached fallback explanation is treated as stale and retried rather than returned again.
 
 ## Deployment Notes
 
-Deploy the backend anywhere that supports a long-running Python process and persistent SQLite disk, or move the same schema to Postgres for production scale. Deploy the frontend as a static Vite build. Set `VITE_API_BASE` to the public backend URL and set `FRONTEND_ORIGIN` on the backend to the public frontend URL.
+Deployed architecture: a free Neon Postgres database, a free Render web service running the Python backend (`python backend/app.py`), and a free Render static site serving the Vite build. Data lives in Postgres rather than on the backend's local disk, since free compute instances are not guaranteed to keep local files across restarts.
+
+- Set `DATABASE_URL` on the backend to the Neon connection string.
+- Set `FRONTEND_ORIGIN` on the backend to the deployed frontend's `https://` URL (this also switches the session cookie to `SameSite=None; Secure`, which cross-origin credentialed requests require).
+- Set `VITE_API_BASE` at frontend build time to the deployed backend's URL.
+- Pin the backend's Python version to 3.11 or 3.12 (see `runtime.txt` / the platform's Python version setting) because `backend/app.py` uses the stdlib `cgi` module, which is removed in Python 3.13.
 
 ## AI Tool Usage
 
