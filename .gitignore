@@ -10,3 +10,5 @@ frontend/dist/
 backend/*.db
 smoke_test.db
 analysis.db
+*.tsbuildinfo
+
