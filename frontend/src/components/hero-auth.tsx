@@ -8,6 +8,28 @@ const Spline = React.lazy(() => import("@splinetool/react-spline"));
 
 type View = "login" | "signup";
 
+// Suspense only covers the lazy import; it does not catch a runtime failure once the
+// Spline component itself tries (and fails) to fetch the 3D scene from its CDN. Without
+// this boundary, a network hiccup, ad-blocker, or restrictive proxy on that one
+// third-party request crashes the entire login screen instead of just losing the
+// decorative background.
+class HeroSceneBoundary extends React.Component<{ children: React.ReactNode }, { hasError: boolean }> {
+  state = { hasError: false };
+
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: unknown) {
+    console.warn("Hero background scene failed to load; falling back to a static background.", error);
+  }
+
+  render() {
+    if (this.state.hasError) return <div className="absolute inset-0 bg-hero-bg" />;
+    return this.props.children;
+  }
+}
+
 const PASSWORD_RULES: { label: string; test: (value: string) => boolean }[] = [
   { label: "At least 8 characters", test: (v) => v.length >= 8 },
   { label: "Upper & lowercase letters", test: (v) => /[a-z]/.test(v) && /[A-Z]/.test(v) },
@@ -103,9 +125,11 @@ export function HeroAuthScreen({ onAuthed }: { onAuthed: (user: User) => void })
       <Navbar view={view} setView={setView} />
       <section className="relative min-h-screen flex items-center bg-hero-bg overflow-hidden">
         <div className="absolute inset-0">
-          <React.Suspense fallback={<div className="absolute inset-0 bg-hero-bg" />}>
-            <Spline scene="https://prod.spline.design/Slk6b8kz3LRlKiyk/scene.splinecode" className="w-full h-full" />
-          </React.Suspense>
+          <HeroSceneBoundary>
+            <React.Suspense fallback={<div className="absolute inset-0 bg-hero-bg" />}>
+              <Spline scene="https://prod.spline.design/Slk6b8kz3LRlKiyk/scene.splinecode" className="w-full h-full" />
+            </React.Suspense>
+          </HeroSceneBoundary>
         </div>
         <div className="absolute inset-0 bg-black/30 z-[1] pointer-events-none" />
 
