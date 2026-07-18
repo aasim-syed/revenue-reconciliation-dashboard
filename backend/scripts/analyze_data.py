@@ -21,15 +21,17 @@ def main():
         print(f"{key}: {value}")
     print("\nDiscrepancies by type")
     for key, count in result["by_type"].items():
-        print(f"{key}: {count} (${app.money_str(result['risk_by_type'][key])})")
+        print(f"{key}: {count} (${float(result['risk_by_type'][key]):,.2f})")
     print("\nTop discrepancies")
     for row in result["rows"][:15]:
         print(
             f"{row['severity']:8} {row['type']:24} "
-            f"{row['order_id']:10} expected=${app.money_str(row['expected_amount'])} "
-            f"actual=${app.money_str(row['actual_amount'])} risk=${app.money_str(row['amount_at_risk'])}"
+            f"{row['order_id']:10} expected=${float(row['expected_amount']):,.2f} "
+            f"actual=${float(row['actual_amount']):,.2f} risk=${float(row['amount_at_risk']):,.2f}"
         )
 
 
 if __name__ == "__main__":
     main()
+
+

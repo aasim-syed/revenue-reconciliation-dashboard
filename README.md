@@ -1,37 +1,68 @@
 ﻿# Revenue Audit
 
-A compact full-stack web app for reconciling store orders against payment processor exports. It supports sign-up, login, per-user CSV imports, deterministic reconciliation, a dashboard with charts and drill-down filtering, and backend-only LLM explanations.
+A monorepo revenue reconciliation app with a Python API backend and a React + TypeScript frontend styled with shadcn-inspired components.
+
+## Structure
+
+```text
+backend/   Python API, SQLite persistence, auth, CSV import, reconciliation, LLM explanations
+frontend/  React + TypeScript + Vite dashboard
+```
 
 ## Run locally
 
-Requirements: Python 3.9 or newer.
+Backend:
 
 ```bash
-cp .env.example .env
-python app.py
+python backend/app.py
 ```
 
-Open `http://127.0.0.1:8000`, sign up, then import `orders.csv` and `payments.csv`.
+Frontend, in another terminal:
 
-No package install is required. The app uses only the Python standard library and stores data in SQLite. Configuration is read from environment variables:
+```bash
+npm install
+npm run dev
+```
+
+Open `http://127.0.0.1:5173`, sign up, then import `orders.csv` and `payments.csv`.
+
+Useful checks:
+
+```bash
+python -m py_compile backend/app.py backend/scripts/analyze_data.py backend/scripts/smoke_test.py
+python backend/scripts/smoke_test.py
+python backend/scripts/analyze_data.py
+npm run build
+```
+
+## Environment
+
+Copy `.env.example` to `.env` for deployment or local process configuration.
 
 - `APP_SECRET`: long random value used to sign session cookies.
-- `DATABASE_PATH`: SQLite file path. Defaults to `./revenue_audit.db`.
+- `DATABASE_PATH`: SQLite file path. Defaults to `./backend/revenue_audit.db`.
+- `FRONTEND_ORIGIN`: allowed browser origin for credentialed CORS.
 - `OPENAI_API_KEY`: optional. Enables discrepancy explanations.
 - `OPENAI_MODEL`: optional. Defaults to `gpt-4.1-mini`.
-- `PORT`: optional. Defaults to `8000`.
+- `PORT`: backend port. Defaults to `8000`.
+- `VITE_API_BASE`: frontend build-time API base URL.
 
 ## Architecture
 
-`app.py` contains the HTTP server, routing, authentication, CSV ingestion, reconciliation engine, dashboard rendering, and LLM integration. SQLite tables are scoped by `user_id`, so each user only sees their own imports and explanations.
+The backend exposes JSON routes under `/api/*`:
 
-Authentication uses email/password sign-up, PBKDF2-HMAC-SHA256 password hashing with a per-password salt, random session tokens, HMAC-signed HTTP-only cookies, and server-side session storage.
+- `POST /api/signup`, `POST /api/login`, `POST /api/logout`, `GET /api/me`
+- `POST /api/import` for the two CSV files
+- `GET /api/dashboard` for deterministic reconciliation output
+- `POST /api/explain` for backend-only LLM explanations
 
-CSV ingestion validates the expected columns, normalizes dates, amounts, currencies, statuses, and order references, then replaces only the current user's previous import. The reconciliation is computed on demand from database records, making it deterministic and repeatable.
+SQLite tables are scoped by `user_id`, so users only see their own imports and explanation cache entries. Authentication uses PBKDF2-HMAC-SHA256 password hashing, random server-side sessions, and HMAC-signed HTTP-only cookies.
+
+The frontend is a Vite React app written in TypeScript. It uses small local shadcn-style primitives for buttons, cards, inputs, selects, and badges, plus Lucide icons. The dashboard includes headline metrics, risk-by-type bars, upload state, filters, search, a discrepancy table, and LLM loading/error states.
 
 ## Reconciliation Logic
 
-Matching is by normalized order identifier: `orders.order_id` to `payments.order_reference`. Matching is case-insensitive because the sample data contains processor references such as lowercase order IDs that clearly refer to existing orders. Amount comparisons use a `$0.01` tolerance to avoid cent-level formatting noise.
+Matching is deterministic by normalized order identifier: `orders.order_id` to `payments.order_reference`. Matching is case-insensitive because the source files include processor references that differ only by case. Amount comparisons use a `$0.01` tolerance to avoid cent-level formatting noise.
 
 Completed orders should have exactly one settled charge in the same currency for the order `net_amount`. Refunds reduce the matched payment total. Cancelled orders should not have captured charge activity. Refunded or returned orders should net to zero.
 
@@ -51,11 +82,11 @@ Discrepancy types implemented:
 - `duplicate_order_id`: order export contains repeated order IDs.
 - `duplicate_transaction_ref`: payment export contains repeated transaction references.
 
-Severity is deterministic: missing money, duplicate captures, currency mismatches, orphan charges, and cancelled-order captures are critical; smaller amount issues and duplicate source identifiers are high unless otherwise specified. `amount_at_risk` is the amount that should be investigated first, usually the absolute expected-versus-actual difference.
+`amount_at_risk` is the amount that should be investigated first, usually the absolute expected-versus-actual difference. Critical issues include missing money, duplicate captures, currency mismatches, orphan charges, and cancelled-order captures.
 
 ## What the Data Shows
 
-Running `python scripts/analyze_data.py` on the supplied files gives:
+Running `python backend/scripts/analyze_data.py` on the supplied files gives:
 
 - Total orders: `185`
 - Total payments: `187`
@@ -80,26 +111,23 @@ Business meaning: the store has both revenue leakage and customer-risk issues. M
 
 ## LLM Approach
 
-The LLM is used only to explain deterministic reconciliation output. It never decides matches, discrepancy types, severity, or money at risk.
+The LLM explains deterministic results only. It never decides matches, classifications, severities, or amounts.
 
-The backend sends the currently filtered discrepancy rows to OpenAI and asks for JSON with `summary`, `likely_causes`, and `recommended_actions`. `temperature` is set to `0.2` because the output should be consistent and operational, not creative. The app requests JSON output and handles malformed responses, missing keys, network failures, and missing API keys by showing a clear fallback message while keeping the deterministic dashboard available.
+The backend sends the currently filtered discrepancy rows to OpenAI and asks for JSON with `summary`, `likely_causes`, and `recommended_actions`. Temperature is `0.2` because the output should be stable and operational. The backend requests JSON output, validates the shape defensively, handles malformed responses and network failures, and returns a clear fallback when no API key is configured.
 
-Explanations are cached by a SHA-256 fingerprint of the selected discrepancy rows for the current user.
+Explanations are cached per user using a SHA-256 fingerprint of the selected discrepancy rows.
 
 ## Deployment Notes
 
-This can run on any host that supports a long-running Python process and persistent disk for SQLite, such as Render, Fly.io, Railway, or a small VPS. For production, set a strong `APP_SECRET`, configure `OPENAI_API_KEY` if explanations are required, and use a persistent `DATABASE_PATH` volume.
-
-For heavier concurrent use, the same schema and reconciliation logic can be moved to Postgres with minimal application changes.
+Deploy the backend anywhere that supports a long-running Python process and persistent SQLite disk, or move the same schema to Postgres for production scale. Deploy the frontend as a static Vite build. Set `VITE_API_BASE` to the public backend URL and set `FRONTEND_ORIGIN` on the backend to the public frontend URL.
 
 ## AI Tool Usage
 
-I used AI assistance to generate and iterate on the implementation, then verified the reconciliation logic with the included analysis script and Python compilation.
+AI assistance was used to generate and iterate on the implementation. The deterministic reconciliation totals were verified with the included smoke test and analyzer.
 
 ## What I Would Improve Next
 
-- Add automated HTTP-level tests for auth, imports, and filtered explanations.
+- Add Playwright coverage for auth, import, filtering, and explanation states.
 - Preserve raw imported rows alongside normalized fields for audit trails.
 - Add downloadable discrepancy reports.
-- Move rendering to templates once the UI grows beyond this compact scope.
-- Add deployment-specific config files for the chosen hosting provider.
+- Add a provider-specific deployment config once hosting is selected.

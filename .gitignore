@@ -1,7 +1,12 @@
-.env
+﻿.env
 *.db
 __pycache__/
 *.pyc
 .venv/
 venv/
 takehome-assignment-brief.md
+node_modules/
+frontend/dist/
+backend/*.db
+smoke_test.db
+analysis.db
