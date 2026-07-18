@@ -113,7 +113,7 @@ Business meaning: the store has both revenue leakage and customer-risk issues. M
 
 The LLM explains deterministic results only. It never decides matches, classifications, severities, or amounts.
 
-The backend sends the currently filtered discrepancy rows to OpenAI and asks for JSON with `summary`, `likely_causes`, and `recommended_actions`. Temperature is `0.2` because the output should be stable and operational. The backend requests JSON output, validates the shape defensively, handles malformed responses and network failures, and returns a clear fallback when no API key is configured.
+The backend sends the currently filtered discrepancy rows to Groq when `GROQ_API_KEY` is present, otherwise to OpenAI when `OPENAI_API_KEY` is present. It asks for JSON with `summary`, `likely_causes`, and `recommended_actions`. Temperature is `0.2` because the output should be stable and operational. The backend requests JSON output, validates the shape defensively, handles malformed responses and network failures, and returns a clear fallback when no API key is configured.
 
 Explanations are cached per user using a SHA-256 fingerprint of the selected discrepancy rows.
 
@@ -131,3 +131,4 @@ AI assistance was used to generate and iterate on the implementation. The determ
 - Preserve raw imported rows alongside normalized fields for audit trails.
 - Add downloadable discrepancy reports.
 - Add a provider-specific deployment config once hosting is selected.
+

@@ -1,4 +1,4 @@
-﻿import csv
+import csv
 import hashlib
 import hmac
 import json
@@ -24,6 +24,24 @@ FRONTEND_ORIGIN = os.environ.get("FRONTEND_ORIGIN", "http://127.0.0.1:5173")
 ALLOWED_ORIGINS = {FRONTEND_ORIGIN, "http://127.0.0.1:5173", "http://localhost:5173"}
 SESSION_COOKIE = "audit_session"
 AMOUNT_TOLERANCE = Decimal("0.01")
+
+
+def load_dotenv(path):
+    env_path = Path(path)
+    if not env_path.exists():
+        return
+    for line in env_path.read_text(encoding="utf-8-sig").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+load_dotenv(BASE_DIR.parent / ".env")
+load_dotenv(BASE_DIR / ".env")
 
 
 def money(value):
@@ -330,19 +348,30 @@ def explain_with_llm(user_id, rows):
         cached = db.execute("SELECT content FROM explanations WHERE user_id = ? AND fingerprint = ?", (user_id, fp)).fetchone()
         if cached:
             return json.loads(cached["content"]), True
-    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
-    if not api_key:
-        return {"summary": "LLM explanations are not configured. Set OPENAI_API_KEY on the backend to enable this feature.", "likely_causes": [], "recommended_actions": []}, False
+    groq_key = os.environ.get("GROQ_API_KEY", "").strip()
+    openai_key = os.environ.get("OPENAI_API_KEY", "").strip()
+    if groq_key:
+        api_key = groq_key
+        endpoint = os.environ.get("GROQ_CHAT_COMPLETIONS_URL", "https://api.groq.com/openai/v1/chat/completions")
+        model = os.environ.get("GROQ_MODEL", "openai/gpt-oss-20b")
+        provider = "Groq"
+    elif openai_key:
+        api_key = openai_key
+        endpoint = "https://api.openai.com/v1/chat/completions"
+        model = os.environ.get("OPENAI_MODEL", "gpt-4.1-mini")
+        provider = "OpenAI"
+    else:
+        return {"summary": "LLM explanations are not configured. Set GROQ_API_KEY or OPENAI_API_KEY on the backend to enable this feature.", "likely_causes": [], "recommended_actions": []}, False
     body = {
-        "model": os.environ.get("OPENAI_MODEL", "gpt-4.1-mini"),
+        "model": model,
         "temperature": 0.2,
         "response_format": {"type": "json_object"},
         "messages": [
-            {"role": "system", "content": "You explain deterministic revenue reconciliation results. Return JSON with keys summary, likely_causes, recommended_actions. Do not change classifications or amounts."},
+            {"role": "system", "content": f"You explain deterministic revenue reconciliation results using {provider}. Return JSON with keys summary, likely_causes, recommended_actions. Do not change classifications or amounts."},
             {"role": "user", "content": json.dumps({"discrepancies": selected}, indent=2)},
         ],
     }
-    req = urllib.request.Request("https://api.openai.com/v1/chat/completions", data=json.dumps(body).encode(), headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}, method="POST")
+    req = urllib.request.Request(endpoint, data=json.dumps(body).encode(), headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}, method="POST")
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
             payload = json.loads(resp.read().decode())
