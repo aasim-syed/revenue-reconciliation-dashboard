@@ -434,14 +434,16 @@ def fingerprint(rows):
 
 
 def render_llm_json(parsed):
-    summary = str(parsed.get("summary", "")).strip()
+    summary = parsed.get("summary", "")
+    if not isinstance(summary, str) or not summary.strip():
+        raise ValueError("Model response 'summary' was not a non-empty string")
     causes = parsed.get("likely_causes", [])
     actions = parsed.get("recommended_actions", [])
     if not isinstance(causes, list):
         causes = [str(causes)]
     if not isinstance(actions, list):
         actions = [str(actions)]
-    return {"summary": summary, "likely_causes": causes[:5], "recommended_actions": actions[:5]}
+    return {"summary": summary.strip(), "likely_causes": [str(c) for c in causes[:5]], "recommended_actions": [str(a) for a in actions[:5]]}
 
 
 def humanize(value):
