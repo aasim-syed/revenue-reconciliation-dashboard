@@ -1,4 +1,5 @@
 import * as React from "react";
+import { Check, X } from "lucide-react";
 import type { User } from "../lib/types";
 import { api } from "../lib/api";
 import { HeroButton } from "./hero-button";
@@ -6,6 +7,59 @@ import { HeroButton } from "./hero-button";
 const Spline = React.lazy(() => import("@splinetool/react-spline"));
 
 type View = "login" | "signup";
+
+const PASSWORD_RULES: { label: string; test: (value: string) => boolean }[] = [
+  { label: "At least 8 characters", test: (v) => v.length >= 8 },
+  { label: "Upper & lowercase letters", test: (v) => /[a-z]/.test(v) && /[A-Z]/.test(v) },
+  { label: "At least one number", test: (v) => /[0-9]/.test(v) },
+  { label: "At least one symbol", test: (v) => /[^A-Za-z0-9]/.test(v) },
+];
+
+const STRENGTH_LEVELS = [
+  { label: "Weak", barClass: "bg-destructive", textClass: "text-destructive" },
+  { label: "Fair", barClass: "bg-amber-500", textClass: "text-amber-500" },
+  { label: "Good", barClass: "bg-sky-400", textClass: "text-sky-400" },
+  { label: "Strong", barClass: "bg-primary", textClass: "text-primary" },
+];
+
+function PasswordStrength({ password }: { password: string }) {
+  const passed = PASSWORD_RULES.filter((rule) => rule.test(password)).length;
+  const level = STRENGTH_LEVELS[Math.max(0, passed - 1)];
+
+  return (
+    <div className="mb-4 -mt-2 grid gap-2">
+      <div className="grid grid-cols-4 gap-1">
+        {PASSWORD_RULES.map((_, i) => (
+          <span
+            key={i}
+            className={`h-1 rounded-full transition-colors ${i < passed ? level.barClass : "bg-border"}`}
+          />
+        ))}
+      </div>
+      <div className="flex items-center justify-between">
+        <span className={`text-xs font-medium ${level.textClass}`}>{level.label}</span>
+      </div>
+      <ul className="grid grid-cols-2 gap-x-3 gap-y-1">
+        {PASSWORD_RULES.map((rule) => {
+          const ok = rule.test(password);
+          return (
+            <li
+              key={rule.label}
+              className={`flex items-center gap-1.5 text-[11px] transition-colors ${ok ? "text-foreground" : "text-muted-foreground"}`}
+            >
+              {ok ? (
+                <Check className="size-3 text-primary shrink-0" />
+              ) : (
+                <X className="size-3 text-muted-foreground/50 shrink-0" />
+              )}
+              {rule.label}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
 
 function Navbar({ view, setView }: { view: View; setView: (v: View) => void }) {
   return (
@@ -115,7 +169,7 @@ export function HeroAuthScreen({ onAuthed }: { onAuthed: (user: User) => void })
                 className="bg-background border border-border rounded-md px-4 py-2.5 text-foreground text-sm outline-none focus:ring-2 focus:ring-ring"
               />
             </label>
-            <label className="grid gap-1.5 mb-4">
+            <label className="grid gap-1.5 mb-3">
               <span className="text-xs uppercase tracking-widest text-muted-foreground">Password</span>
               <input
                 type="password"
@@ -126,19 +180,11 @@ export function HeroAuthScreen({ onAuthed }: { onAuthed: (user: User) => void })
                 className="bg-background border border-border rounded-md px-4 py-2.5 text-foreground text-sm outline-none focus:ring-2 focus:ring-ring"
               />
             </label>
+            {view === "signup" && password.length > 0 && <PasswordStrength password={password} />}
             {error && <p className="text-destructive text-xs mb-3">{error}</p>}
-            <div className="flex flex-wrap gap-3 font-bold">
-              <HeroButton type="submit" variant="hero" disabled={loading}>
-                {loading ? "Please wait" : view === "login" ? "Log In" : "Create Account"}
-              </HeroButton>
-              <HeroButton
-                type="button"
-                variant="heroOutline"
-                onClick={() => setView(view === "login" ? "signup" : "login")}
-              >
-                {view === "login" ? "Sign Up Instead" : "Log In Instead"}
-              </HeroButton>
-            </div>
+            <HeroButton type="submit" variant="hero" disabled={loading} className="w-full font-bold">
+              {loading ? "Please wait" : view === "login" ? "Log In" : "Create Account"}
+            </HeroButton>
           </form>
         </div>
       </section>
