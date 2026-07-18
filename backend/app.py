@@ -529,7 +529,18 @@ def explain_with_llm(user_id, rows):
             "temperature": 0.2,
             "response_format": {"type": "json_object"},
             "messages": [
-                {"role": "system", "content": f"You explain deterministic revenue reconciliation results using {provider['name']}. Return JSON with keys summary, likely_causes, recommended_actions. Do not change classifications or amounts."},
+                {
+                    "role": "system",
+                    "content": (
+                        f"You explain deterministic revenue reconciliation results using {provider['name']}. "
+                        "Do not change classifications, severities, or amounts - only describe them in plain language. "
+                        "Return a JSON object with exactly these keys: "
+                        '"summary" (a single plain-language string, 2-3 sentences, never an object or array), '
+                        '"likely_causes" (an array of short plain-language strings), '
+                        '"recommended_actions" (an array of short plain-language strings). '
+                        'Example shape: {"summary": "...", "likely_causes": ["...", "..."], "recommended_actions": ["...", "..."]}'
+                    ),
+                },
                 {"role": "user", "content": json.dumps({"discrepancies": selected}, indent=2)},
             ],
         }
