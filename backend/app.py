@@ -371,11 +371,14 @@ def explain_with_llm(user_id, rows):
             {"role": "user", "content": json.dumps({"discrepancies": selected}, indent=2)},
         ],
     }
-    req = urllib.request.Request(endpoint, data=json.dumps(body).encode(), headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}, method="POST")
+    req = urllib.request.Request(endpoint, data=json.dumps(body).encode(), headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json", "User-Agent": "revenue-audit-local-dev/1.0"}, method="POST")
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
             payload = json.loads(resp.read().decode())
         parsed = render_llm_json(json.loads(payload["choices"][0]["message"]["content"]))
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode(errors="replace")[:800]
+        parsed = {"summary": f"The explanation service returned HTTP {exc.code}. Deterministic results are still available. Provider response: {detail}", "likely_causes": [], "recommended_actions": []}
     except (urllib.error.URLError, KeyError, IndexError, json.JSONDecodeError, TimeoutError) as exc:
         parsed = {"summary": f"The explanation service returned an unusable response. Deterministic results are still available. Error: {exc}", "likely_causes": [], "recommended_actions": []}
     with connect() as db:
