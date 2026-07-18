@@ -1,12 +1,74 @@
 ﻿import React from "react";
 import { createRoot } from "react-dom/client";
-import { AlertCircle, ArrowDownUp, Banknote, FileUp, Filter, Loader2, LogOut, Search, ShieldCheck, Sparkles, TriangleAlert } from "lucide-react";
+import { AlertCircle, ArrowDownUp, Banknote, FileCheck2, Filter, Loader2, LogOut, Search, ShieldCheck, Sparkles, TriangleAlert, UploadCloud, X } from "lucide-react";
 import { api } from "./lib/api";
 import type { Dashboard, Discrepancy, Explanation, User } from "./lib/types";
 import { currency, labelize } from "./lib/utils";
 import { Badge, Button, Card, Input, Select } from "./components/ui";
 import { HeroAuthScreen } from "./components/hero-auth";
 import "./styles.css";
+
+function DropZone({ label, file, onFile }: { label: string; file: File | null; onFile: (file: File | null) => void }) {
+  const [dragOver, setDragOver] = React.useState(false);
+  const [error, setError] = React.useState("");
+  const inputRef = React.useRef<HTMLInputElement>(null);
+
+  function accept(picked: File | undefined) {
+    if (!picked) return;
+    if (!picked.name.toLowerCase().endsWith(".csv")) {
+      setError("Only .csv files are accepted.");
+      return;
+    }
+    setError("");
+    onFile(picked);
+  }
+
+  return (
+    <div
+      className={`dropzone ${dragOver ? "dropzone-active" : ""} ${file ? "dropzone-filled" : ""}`}
+      role="button"
+      tabIndex={0}
+      onClick={() => inputRef.current?.click()}
+      onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && inputRef.current?.click()}
+      onDragOver={(e) => {
+        e.preventDefault();
+        setDragOver(true);
+      }}
+      onDragLeave={() => setDragOver(false)}
+      onDrop={(e) => {
+        e.preventDefault();
+        setDragOver(false);
+        accept(e.dataTransfer.files?.[0]);
+      }}
+    >
+      <input
+        ref={inputRef}
+        type="file"
+        accept=".csv,text/csv"
+        className="sr-only"
+        onChange={(e) => accept(e.target.files?.[0])}
+      />
+      {file ? <FileCheck2 size={20} /> : <UploadCloud size={20} />}
+      <div className="dropzone-text">
+        <strong>{file ? file.name : label}</strong>
+        <span>{file ? `${(file.size / 1024).toFixed(1)} KB` : error || "Drag & drop, or click to browse"}</span>
+      </div>
+      {file && (
+        <button
+          type="button"
+          className="dropzone-remove"
+          aria-label={`Remove ${file.name}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            onFile(null);
+          }}
+        >
+          <X size={14} />
+        </button>
+      )}
+    </div>
+  );
+}
 
 function ImportPanel({ onImported }: { onImported: (dashboard: Dashboard) => void }) {
   const [orders, setOrders] = React.useState<File | null>(null);
@@ -39,9 +101,9 @@ function ImportPanel({ onImported }: { onImported: (dashboard: Dashboard) => voi
         <p>Replace your current workspace data with a fresh pair of CSV exports.</p>
       </div>
       <form onSubmit={upload} className="upload-grid">
-        <label>orders.csv<Input type="file" accept=".csv,text/csv" onChange={(e) => setOrders(e.target.files?.[0] ?? null)} required /></label>
-        <label>payments.csv<Input type="file" accept=".csv,text/csv" onChange={(e) => setPayments(e.target.files?.[0] ?? null)} required /></label>
-        <Button disabled={loading || !orders || !payments}>{loading ? <Loader2 className="spin" size={16} /> : <FileUp size={16} />}Import</Button>
+        <DropZone label="orders.csv" file={orders} onFile={setOrders} />
+        <DropZone label="payments.csv" file={payments} onFile={setPayments} />
+        <Button disabled={loading || !orders || !payments}>{loading ? <Loader2 className="spin" size={16} /> : <UploadCloud size={16} />}Import</Button>
       </form>
       {message && <p className="success">{message}</p>}
       {error && <p className="form-error"><AlertCircle size={16} />{error}</p>}

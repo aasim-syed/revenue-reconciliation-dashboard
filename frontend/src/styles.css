@@ -88,7 +88,20 @@ label { display: grid; gap: 7px; font-size: 13px; font-weight: 700; color: var(-
 .topbar h1 { margin-bottom: 4px; }
 .topbar p { margin-bottom: 0; }
 .import-card { display: grid; grid-template-columns: 1fr 2fr; gap: 18px; align-items: start; margin-bottom: 18px; }
-.upload-grid { display: grid; grid-template-columns: 1fr 1fr auto; gap: 12px; align-items: end; }
+.upload-grid { display: grid; grid-template-columns: 1fr 1fr auto; gap: 12px; align-items: center; }
+
+.dropzone { display: flex; align-items: center; gap: 10px; min-height: 84px; padding: 14px; border: 1.5px dashed var(--border); border-radius: 8px; background: var(--card); color: var(--muted); cursor: pointer; transition: border-color .15s, background .15s; }
+.dropzone:hover, .dropzone:focus-visible { border-color: var(--primary); outline: none; }
+.dropzone-active { border-color: var(--primary); background: hsl(119 40% 14%); }
+.dropzone-filled { border-style: solid; border-color: hsl(119 50% 30%); color: var(--foreground); }
+.dropzone svg { flex-shrink: 0; color: var(--muted); }
+.dropzone-filled svg { color: var(--primary); }
+.dropzone-text { display: grid; gap: 2px; flex: 1; min-width: 0; }
+.dropzone-text strong { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dropzone-text span { font-size: 12px; color: var(--muted); }
+.dropzone-remove { flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; background: transparent; border: none; border-radius: 6px; color: var(--muted); cursor: pointer; }
+.dropzone-remove:hover { color: var(--foreground); background: hsl(0 0% 24%); }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 .empty-state { display: flex; gap: 12px; align-items: flex-start; margin-bottom: 18px; border-color: hsl(38 60% 30%); background: hsl(38 40% 14%); }
 .empty-state svg { color: var(--high); margin-top: 2px; }
 .empty-state p { margin-bottom: 0; }
