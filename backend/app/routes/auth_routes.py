@@ -1,11 +1,12 @@
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, Request, Response
 
 from ..config import COOKIE_SECURE, SESSION_COOKIE
 from ..deps import get_current_user, get_session_token
 from ..models.schemas import AuthRequest, AuthResponse, LogoutResponse, MeResponse
 from ..services import auth_service
+from ..services.rate_limit import check_rate_limit
 from ..services.security import sign_token
 
 router = APIRouter(prefix="/api", tags=["auth"])
@@ -22,15 +23,22 @@ def _attach_session_cookie(response: Response, token: str) -> None:
     )
 
 
+def _rate_limit_key(request: Request, email: str) -> str:
+    ip = request.headers.get("x-forwarded-for", "").split(",")[0].strip() or (request.client.host if request.client else "unknown")
+    return f"{ip}:{(email or '').strip().lower()}"
+
+
 @router.post("/signup", response_model=AuthResponse)
-def signup(payload: AuthRequest, response: Response):
+def signup(payload: AuthRequest, request: Request, response: Response):
+    check_rate_limit(_rate_limit_key(request, payload.email))
     user, token = auth_service.signup(payload.email, payload.password)
     _attach_session_cookie(response, token)
     return {"user": user}
 
 
 @router.post("/login", response_model=AuthResponse)
-def login(payload: AuthRequest, response: Response):
+def login(payload: AuthRequest, request: Request, response: Response):
+    check_rate_limit(_rate_limit_key(request, payload.email))
     user, token = auth_service.login(payload.email, payload.password)
     _attach_session_cookie(response, token)
     return {"user": user}

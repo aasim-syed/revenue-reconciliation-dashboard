@@ -31,7 +31,7 @@ def delete_session(token):
 def get_user_by_session_token(token):
     with connect() as db:
         row = db.execute(
-            "SELECT users.id, users.email FROM sessions JOIN users ON users.id = sessions.user_id WHERE sessions.token = ?",
+            "SELECT users.id, users.email, sessions.created_at FROM sessions JOIN users ON users.id = sessions.user_id WHERE sessions.token = ?",
             (token,),
         ).fetchone()
     return dict(row) if row else None

@@ -32,6 +32,9 @@ EXTRA_ORIGINS = {o.strip() for o in os.environ.get("EXTRA_ALLOWED_ORIGINS", "").
 ALLOWED_ORIGINS = {FRONTEND_ORIGIN, "http://127.0.0.1:5173", "http://localhost:5173"} | EXTRA_ORIGINS
 SESSION_COOKIE = "audit_session"
 AMOUNT_TOLERANCE = Decimal("0.01")
+SESSION_MAX_AGE_DAYS = int(os.environ.get("SESSION_MAX_AGE_DAYS", "7"))
+RATE_LIMIT_WINDOW_SECONDS = int(os.environ.get("RATE_LIMIT_WINDOW_SECONDS", "300"))
+RATE_LIMIT_MAX_ATTEMPTS = int(os.environ.get("RATE_LIMIT_MAX_ATTEMPTS", "8"))
 # Cross-origin deployments (separate frontend/backend hosts) need SameSite=None; Secure
 # for the browser to send the session cookie on credentialed fetches. Local dev stays on
 # plain http, so it keeps SameSite=Lax without Secure. Derived from FRONTEND_ORIGIN's
