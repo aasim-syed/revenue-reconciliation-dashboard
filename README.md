@@ -59,6 +59,28 @@ python backend/scripts/analyze_data.py
 npm run build
 ```
 
+## Tests
+
+Backend (pytest, 39 tests: auth, session expiry, rate limiting, per-user data isolation, every
+discrepancy type including the amount-tolerance boundary, the golden-dataset regression against the
+real CSVs, and the explain-endpoint row-signature check):
+
+```bash
+cd backend
+pip install -r requirements-dev.txt
+pytest
+```
+
+Frontend (Playwright, end-to-end against a real backend + Vite dev server it starts itself): signup →
+import → dashboard → severity-filter → explain, the dashboard-fetch-failure retry path, and a
+second account seeing no data. Needs `pip install -r backend/requirements-dev.txt`-level backend deps
+on `PATH` as `python`, plus a Chromium install the first time (`npx playwright install chromium`):
+
+```bash
+cd frontend
+npm run test:e2e
+```
+
 ## Environment
 
 Copy `.env.example` to `.env` for deployment or local process configuration.
@@ -101,7 +123,7 @@ it cross-checks every row against that user's current server-computed reconcilia
 anything that doesn't match a real discrepancy before it reaches the LLM prompt, rather than trusting
 whatever the request body contains.
 
-The frontend is a Vite React app written in TypeScript. It uses small local shadcn-style primitives for buttons, cards, inputs, selects, and badges, plus Lucide icons. The dashboard includes headline metrics, a risk-by-type chart, a severity-breakdown chart (both clickable to filter the drill-down table, with removable filter chips), upload state, search, a discrepancy table, and LLM loading/error states. A failed `/api/dashboard` fetch shows an explicit error with a Retry action instead of spinning forever.
+The frontend is a Vite React app written in TypeScript. It uses small local shadcn-style primitives for buttons, cards, inputs, selects, and badges, plus Lucide icons. The dashboard includes headline metrics, a risk-by-type chart, a severity-breakdown chart (both clickable to filter the drill-down table, with removable filter chips), upload state, search, a discrepancy table, and LLM loading/error states. A failed `/api/dashboard` fetch shows an explicit error with a Retry action instead of spinning forever. The login screen's decorative 3D background (Spline) is wrapped in a React error boundary: a blocked or failed request to that third-party CDN falls back to a static background instead of crashing the entire auth screen — found while writing the Playwright suite, which blocks that CDN call to keep the tests hermetic.
 
 ## Reconciliation Logic
 
@@ -180,8 +202,6 @@ AI assistance was used to generate and iterate on the implementation. The determ
 
 ## What I Would Improve Next
 
-- Add Playwright coverage for auth, import, filtering, and explanation states (verified these manually
-  with a scripted Playwright run while building this, but there's no committed automated suite yet).
 - Move the rate limiter from in-memory to a shared store (Redis) before running more than one backend
   instance, since the current sliding window is per-process.
 - Add a "logout everywhere" action that revokes all of a user's sessions, not just the current one.
