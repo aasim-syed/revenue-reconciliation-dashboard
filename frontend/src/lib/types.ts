@@ -28,6 +28,8 @@ export type Dashboard = {
   summary: Summary;
   by_type: Record<string, number>;
   risk_by_type: Record<string, string>;
+  by_severity: Record<string, number>;
+  risk_by_severity: Record<string, string>;
   rows: Discrepancy[];
   has_data: boolean;
 };

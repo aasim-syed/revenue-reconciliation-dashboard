@@ -115,7 +115,7 @@ function Metric({ label, value, icon }: { label: string; value: string | number;
   return <Card className="metric"><span>{icon}{label}</span><strong>{value}</strong></Card>;
 }
 
-function RiskChart({ dashboard, setType }: { dashboard: Dashboard; setType: (value: string) => void }) {
+function RiskChart({ dashboard, type, setType }: { dashboard: Dashboard; type: string; setType: (value: string) => void }) {
   const entries = Object.entries(dashboard.risk_by_type).sort((a, b) => Number(b[1]) - Number(a[1]));
   const max = Math.max(1, ...entries.map(([, value]) => Number(value)));
   return (
@@ -123,13 +123,51 @@ function RiskChart({ dashboard, setType }: { dashboard: Dashboard; setType: (val
       <div className="panel-head"><h2>Risk by type</h2><Badge>{dashboard.summary.discrepancy_count} issues</Badge></div>
       <div className="bars">
         {entries.length === 0 && <p className="empty">No discrepancy risk to chart.</p>}
-        {entries.map(([type, value]) => (
-          <button className="bar-row" key={type} onClick={() => setType(type)}>
-            <span>{labelize(type)}</span>
+        {entries.map(([entryType, value]) => (
+          <button
+            className={`bar-row ${type === entryType ? "bar-row-active" : ""}`}
+            key={entryType}
+            onClick={() => setType(type === entryType ? "" : entryType)}
+          >
+            <span>{labelize(entryType)}</span>
             <div className="bar-track"><i style={{ width: `${(Number(value) / max) * 100}%` }} /></div>
             <strong>{currency(value)}</strong>
           </button>
         ))}
+      </div>
+    </Card>
+  );
+}
+
+const SEVERITY_ORDER = ["critical", "high", "medium", "low"] as const;
+const SEVERITY_COLOR: Record<string, string> = {
+  critical: "var(--critical)",
+  high: "var(--high)",
+  medium: "var(--medium)",
+  low: "var(--low)",
+};
+
+function SeverityChart({ dashboard, severity, setSeverity }: { dashboard: Dashboard; severity: string; setSeverity: (value: string) => void }) {
+  const max = Math.max(1, ...SEVERITY_ORDER.map((sev) => Number(dashboard.risk_by_severity[sev] ?? 0)));
+  return (
+    <Card>
+      <div className="panel-head"><h2>Severity breakdown</h2><Badge>{dashboard.summary.discrepancy_count} issues</Badge></div>
+      <div className="bars">
+        {SEVERITY_ORDER.map((sev) => {
+          const count = dashboard.by_severity[sev] ?? 0;
+          const risk = Number(dashboard.risk_by_severity[sev] ?? 0);
+          return (
+            <button
+              className={`bar-row ${severity === sev ? "bar-row-active" : ""}`}
+              key={sev}
+              onClick={() => setSeverity(severity === sev ? "" : sev)}
+            >
+              <span><Badge tone={sev as "critical" | "high" | "medium" | "low"}>{labelize(sev)}</Badge> {count}</span>
+              <div className="bar-track"><i style={{ width: `${(risk / max) * 100}%`, background: SEVERITY_COLOR[sev] }} /></div>
+              <strong>{currency(risk)}</strong>
+            </button>
+          );
+        })}
       </div>
     </Card>
   );
@@ -192,10 +230,13 @@ function DiscrepancyTable({ rows }: { rows: Discrepancy[] }) {
 function DashboardScreen({ user, dashboard, setDashboard, onLogout }: { user: User; dashboard: Dashboard | null; setDashboard: (d: Dashboard) => void; onLogout: () => void }) {
   const [query, setQuery] = React.useState("");
   const [type, setType] = React.useState("");
+  const [severity, setSeverity] = React.useState("");
   const rows = React.useMemo(() => {
     const q = query.trim().toLowerCase();
-    return (dashboard?.rows ?? []).filter((row) => (!type || row.type === type) && (!q || JSON.stringify(row).toLowerCase().includes(q)));
-  }, [dashboard, query, type]);
+    return (dashboard?.rows ?? []).filter(
+      (row) => (!type || row.type === type) && (!severity || row.severity === severity) && (!q || JSON.stringify(row).toLowerCase().includes(q))
+    );
+  }, [dashboard, query, type, severity]);
   const types = Object.keys(dashboard?.by_type ?? {}).sort();
 
   if (!dashboard) return <main className="loading"><Loader2 className="spin" />Loading dashboard</main>;
@@ -216,13 +257,25 @@ function DashboardScreen({ user, dashboard, setDashboard, onLogout }: { user: Us
         <Metric label="Money at risk" value={currency(dashboard.summary.money_at_risk)} icon={<AlertCircle size={16} />} />
       </section>
       <section className="two-col">
-        <RiskChart dashboard={dashboard} setType={setType} />
+        <div className="chart-stack">
+          <RiskChart dashboard={dashboard} type={type} setType={setType} />
+          <SeverityChart dashboard={dashboard} severity={severity} setSeverity={setSeverity} />
+        </div>
         <ExplanationPanel rows={rows} />
       </section>
       <Card>
         <div className="table-toolbar">
-          <div><h2>Discrepancy drill-down</h2><p>{rows.length} visible of {dashboard.rows.length}</p></div>
-          <div className="filters"><div className="search-box"><Search size={16} /><Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search order, transaction, reason" /></div><Select value={type} onChange={(e) => setType(e.target.value)}><option value="">All types</option>{types.map((item) => <option key={item} value={item}>{labelize(item)}</option>)}</Select><Button variant="ghost" onClick={() => { setQuery(""); setType(""); }}><Filter size={16} />Reset</Button></div>
+          <div>
+            <h2>Discrepancy drill-down</h2>
+            <p>{rows.length} visible of {dashboard.rows.length}</p>
+            {(type || severity) && (
+              <div className="active-filters">
+                {type && <Badge>{labelize(type)}<button type="button" onClick={() => setType("")} aria-label="Clear type filter"><X size={12} /></button></Badge>}
+                {severity && <Badge tone={severity as "critical" | "high" | "medium" | "low"}>{labelize(severity)}<button type="button" onClick={() => setSeverity("")} aria-label="Clear severity filter"><X size={12} /></button></Badge>}
+              </div>
+            )}
+          </div>
+          <div className="filters"><div className="search-box"><Search size={16} /><Input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search order, transaction, reason" /></div><Select value={type} onChange={(e) => setType(e.target.value)}><option value="">All types</option>{types.map((item) => <option key={item} value={item}>{labelize(item)}</option>)}</Select><Button variant="ghost" onClick={() => { setQuery(""); setType(""); setSeverity(""); }}><Filter size={16} />Reset</Button></div>
         </div>
         <DiscrepancyTable rows={rows} />
       </Card>
@@ -234,17 +287,26 @@ function App() {
   const [user, setUser] = React.useState<User | null>(null);
   const [dashboard, setDashboard] = React.useState<Dashboard | null>(null);
   const [booting, setBooting] = React.useState(true);
+  const [dashboardError, setDashboardError] = React.useState("");
 
   async function loadDashboard() {
-    const data = await api.dashboard();
-    setDashboard(data);
+    setDashboardError("");
+    try {
+      const data = await api.dashboard();
+      setDashboard(data);
+    } catch (err) {
+      setDashboardError(err instanceof Error ? err.message : "Failed to load the dashboard");
+    }
   }
 
   React.useEffect(() => {
-    api.me().then(async ({ user }) => {
-      setUser(user);
-      if (user) await loadDashboard();
-    }).finally(() => setBooting(false));
+    api.me()
+      .then(async ({ user }) => {
+        setUser(user);
+        if (user) await loadDashboard();
+      })
+      .catch(() => setDashboardError("Could not reach the server"))
+      .finally(() => setBooting(false));
   }, []);
 
   async function onAuthed(nextUser: User) {
@@ -260,6 +322,24 @@ function App() {
 
   if (booting) return <main className="loading"><Loader2 className="spin" />Starting workspace</main>;
   if (!user) return <HeroAuthScreen onAuthed={onAuthed} />;
+  if (!dashboard) {
+    return (
+      <main className="loading">
+        {dashboardError ? (
+          <>
+            <AlertCircle size={22} />
+            <p>{dashboardError}</p>
+            <Button onClick={loadDashboard}>Retry</Button>
+          </>
+        ) : (
+          <>
+            <Loader2 className="spin" />
+            Loading dashboard
+          </>
+        )}
+      </main>
+    );
+  }
   return <DashboardScreen user={user} dashboard={dashboard} setDashboard={setDashboard} onLogout={logout} />;
 }
 
