@@ -1,21 +1,25 @@
-﻿from pathlib import Path
+from pathlib import Path
 import os
 import sys
 
 os.environ["DATABASE_PATH"] = "analysis.db"
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-import app
+from app import config  # noqa: E402
+config.DB_PATH = "analysis.db"
+
+from app.db.connection import connect, init_db  # noqa: E402
+from app.services.import_service import import_csvs  # noqa: E402
+from app.services.reconciliation_service import reconcile  # noqa: E402
 
 
 def main():
-    app.DB_PATH = "analysis.db"
-    app.init_db()
-    with app.connect() as db:
+    init_db()
+    with connect() as db:
         db.execute("DELETE FROM users")
         db.execute("INSERT INTO users (id, email, password_hash) VALUES (1, 'analysis@example.com', 'unused')")
-    app.import_csvs(1, Path("orders.csv").read_text(), Path("payments.csv").read_text())
-    result = app.reconcile(1)
+    import_csvs(1, Path("orders.csv").read_text(), Path("payments.csv").read_text())
+    result = reconcile(1)
     print("Summary")
     for key, value in result["summary"].items():
         print(f"{key}: {value}")
@@ -33,5 +37,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-

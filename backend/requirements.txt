@@ -1,4 +1,7 @@
-# Core app logic uses only the Python standard library.
+# FastAPI app with a layered config/db/models/services/routes structure.
 # psycopg2-binary is only imported when DATABASE_URL is set (production Postgres);
-# local dev and the smoke test default to SQLite and need no extra packages.
+# local dev and the smoke test default to SQLite and need no extra packages for storage.
+fastapi
+uvicorn[standard]
+python-multipart
 psycopg2-binary

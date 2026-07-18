@@ -1,4 +1,4 @@
-﻿from pathlib import Path
+from pathlib import Path
 import os
 import sys
 
@@ -9,14 +9,19 @@ if DB.exists():
     DB.unlink()
 
 os.environ["DATABASE_PATH"] = str(DB)
-import app
 
-app.DB_PATH = str(DB)
-app.init_db()
-with app.connect() as db:
+from app import config  # noqa: E402
+config.DB_PATH = str(DB)
+
+from app.db.connection import connect, init_db  # noqa: E402
+from app.services.import_service import import_csvs  # noqa: E402
+from app.services.reconciliation_service import reconcile  # noqa: E402
+
+init_db()
+with connect() as db:
     db.execute("INSERT INTO users (id, email, password_hash) VALUES (1, 'smoke@example.com', 'unused')")
-imported = app.import_csvs(1, Path("orders.csv").read_text(), Path("payments.csv").read_text())
-result = app.reconcile(1)
+imported = import_csvs(1, Path("orders.csv").read_text(), Path("payments.csv").read_text())
+result = reconcile(1)
 
 assert imported == (185, 187), imported
 assert result["summary"]["total_orders"] == 185

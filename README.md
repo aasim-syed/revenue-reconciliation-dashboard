@@ -5,16 +5,40 @@ A monorepo revenue reconciliation app with a Python API backend and a React + Ty
 ## Structure
 
 ```text
-backend/   Python API, SQLite persistence, auth, CSV import, reconciliation, LLM explanations
+backend/
+  app/
+    main.py        FastAPI app: CORS, lifespan (DB init), routers, error shaping
+    config.py       Env vars and derived settings, .env loading
+    deps.py          Auth dependencies (current user / require-login)
+    db/
+      connection.py    SQLite/Postgres connection + schema
+      repositories.py  All raw SQL, one function per query
+    models/
+      schemas.py       Pydantic request/response models
+    services/
+      security.py             Password hashing, session token signing
+      auth_service.py          Signup/login/logout orchestration
+      import_service.py        CSV parsing/normalization
+      reconciliation_service.py Deterministic matching engine
+      llm_service.py            LLM explanation calls, fallback, caching
+    routes/
+      auth_routes.py, dashboard_routes.py, import_routes.py, explain_routes.py
+  scripts/           smoke_test.py, analyze_data.py (exercise the services directly)
 frontend/  React + TypeScript + Vite dashboard
 ```
+
+Routes only parse the request and call a service; services hold business logic and call
+repositories; repositories are the only place that touches SQL. This keeps the reconciliation
+engine and the LLM layer independently testable from the HTTP layer (see `backend/scripts/`).
 
 ## Run locally
 
 Backend:
 
 ```bash
-python backend/app.py
+cd backend
+pip install -r requirements.txt
+uvicorn app.main:app --reload
 ```
 
 Frontend, in another terminal:
@@ -24,12 +48,12 @@ npm install
 npm run dev
 ```
 
-Open `http://127.0.0.1:5173`, sign up, then import `orders.csv` and `payments.csv`.
+Open `http://127.0.0.1:5173`, sign up, then import `orders.csv` and `payments.csv`. Interactive API
+docs are available at `http://127.0.0.1:8000/docs` while the backend is running.
 
 Useful checks:
 
 ```bash
-python -m py_compile backend/app.py backend/scripts/analyze_data.py backend/scripts/smoke_test.py
 python backend/scripts/smoke_test.py
 python backend/scripts/analyze_data.py
 npm run build
@@ -51,14 +75,21 @@ Copy `.env.example` to `.env` for deployment or local process configuration.
 
 ## Architecture
 
-The backend exposes JSON routes under `/api/*`:
+The backend is a FastAPI app under `backend/app/`, layered as routes → services → repositories → db:
 
 - `POST /api/signup`, `POST /api/login`, `POST /api/logout`, `GET /api/me`
 - `POST /api/import` for the two CSV files
 - `GET /api/dashboard` for deterministic reconciliation output
 - `POST /api/explain` for backend-only LLM explanations
 
-SQLite tables are scoped by `user_id`, so users only see their own imports and explanation cache entries. Authentication uses PBKDF2-HMAC-SHA256 password hashing, random server-side sessions, and HMAC-signed HTTP-only cookies.
+Pydantic models in `app/models/schemas.py` validate every request body and shape every response,
+so the API contract is enforced (and self-documented at `/docs`) rather than assembled by hand.
+A global exception handler reshapes FastAPI's default `{"detail": ...}` errors to `{"error": ...}`
+to match the frontend's existing error handling.
+
+Tables (`users`, `sessions`, `orders`, `payments`, `explanations`) are scoped by `user_id`, so users
+only see their own imports and explanation cache entries. Authentication uses PBKDF2-HMAC-SHA256
+password hashing, random server-side sessions, and HMAC-signed HTTP-only cookies.
 
 The frontend is a Vite React app written in TypeScript. It uses small local shadcn-style primitives for buttons, cards, inputs, selects, and badges, plus Lucide icons. The dashboard includes headline metrics, risk-by-type bars, upload state, filters, search, a discrepancy table, and LLM loading/error states.
 
@@ -123,12 +154,12 @@ Explanations are cached per user using a SHA-256 fingerprint of the selected dis
 
 ## Deployment Notes
 
-Deployed architecture: a free Neon Postgres database, a free Render web service running the Python backend (`python backend/app.py`), and a free Render static site serving the Vite build. Data lives in Postgres rather than on the backend's local disk, since free compute instances are not guaranteed to keep local files across restarts.
+Deployed architecture: a free Neon Postgres database, a free Render web service running the FastAPI backend (`uvicorn app.main:app`), and a free Render static site serving the Vite build. Data lives in Postgres rather than on the backend's local disk, since free compute instances are not guaranteed to keep local files across restarts.
 
 - Set `DATABASE_URL` on the backend to the Neon connection string.
 - Set `FRONTEND_ORIGIN` on the backend to the deployed frontend's `https://` URL (this also switches the session cookie to `SameSite=None; Secure`, which cross-origin credentialed requests require).
 - Set `VITE_API_BASE` at frontend build time to the deployed backend's URL.
-- Pin the backend's Python version to 3.11 or 3.12 (see `runtime.txt` / the platform's Python version setting) because `backend/app.py` uses the stdlib `cgi` module, which is removed in Python 3.13.
+- `runtime.txt` / the platform's Python version setting pins the backend to 3.12.
 
 ## AI Tool Usage
 
@@ -140,4 +171,5 @@ AI assistance was used to generate and iterate on the implementation. The determ
 - Preserve raw imported rows alongside normalized fields for audit trails.
 - Add downloadable discrepancy reports.
 - Add a provider-specific deployment config once hosting is selected.
+- Move repositories from a connection-per-query pattern to a request-scoped connection or pool.
 
