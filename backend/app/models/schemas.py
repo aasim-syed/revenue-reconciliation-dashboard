@@ -57,6 +57,8 @@ class DashboardResponse(BaseModel):
     summary: DashboardSummary
     by_type: Dict[str, int]
     risk_by_type: Dict[str, str]
+    by_severity: Dict[str, int]
+    risk_by_severity: Dict[str, str]
     rows: List[DiscrepancyOut]
     has_data: bool
 

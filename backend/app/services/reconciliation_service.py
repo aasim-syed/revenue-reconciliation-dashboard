@@ -27,6 +27,9 @@ def parse_dt(value):
     return raw
 
 
+SEVERITY_ORDER = ("critical", "high", "medium", "low")
+
+
 def severity_rank(value):
     return {"critical": 0, "high": 1, "medium": 2, "low": 3}.get(value, 9)
 
@@ -94,10 +97,17 @@ def reconcile(user_id):
                 rows.append(discrepancy("underpaid" if payment_total < order_net else "overpaid", "critical", order, linked, order_net, payment_total, abs(order_net - payment_total), "The settled payment total does not equal the completed order value."))
             else:
                 reconciled_value += order_net
-        elif order["status"] in {"cancelled", "canceled"} and charge_total > AMOUNT_TOLERANCE:
-            rows.append(discrepancy("charged_cancelled_order", "critical", order, linked, Decimal("0.00"), payment_total, payment_total, "A cancelled order still has captured payment activity."))
-        elif order["status"] in {"refunded", "returned"} and abs(payment_total) > AMOUNT_TOLERANCE:
-            rows.append(discrepancy("refund_not_balanced", "high", order, linked, Decimal("0.00"), payment_total, abs(payment_total), "A refunded order does not net to zero in the payment processor."))
+        elif order["status"] in {"cancelled", "canceled"}:
+            if charge_total > AMOUNT_TOLERANCE:
+                rows.append(discrepancy("charged_cancelled_order", "critical", order, linked, Decimal("0.00"), payment_total, payment_total, "A cancelled order still has captured payment activity."))
+        elif order["status"] in {"refunded", "returned"}:
+            if abs(payment_total) > AMOUNT_TOLERANCE:
+                rows.append(discrepancy("refund_not_balanced", "high", order, linked, Decimal("0.00"), payment_total, abs(payment_total), "A refunded order does not net to zero in the payment processor."))
+        else:
+            # Any status outside the recognized set (completed/cancelled/canceled/refunded/returned)
+            # is flagged rather than silently skipped, so an unfamiliar export value can't make an
+            # order vanish from both the reconciled and disputed totals.
+            rows.append(discrepancy("unexpected_status", "medium", order, linked, order_net, payment_total, order_net, f"Order status '{order['status']}' is not one this reconciliation recognizes, so it was not verified."))
 
     for payment in sorted(payments, key=lambda r: (r["order_reference"], r["transaction_ref"], r["id"])):
         if payment["id"] in matched_payment_ids:
@@ -118,6 +128,10 @@ def reconcile(user_id):
     risk_by_type = defaultdict(Decimal)
     for row in rows:
         risk_by_type[row["type"]] += money(row["amount_at_risk"])
+    by_severity = Counter(r["severity"] for r in rows)
+    risk_by_severity = defaultdict(Decimal)
+    for row in rows:
+        risk_by_severity[row["severity"]] += money(row["amount_at_risk"])
     return {
         "summary": {
             "total_orders": len(orders),
@@ -130,6 +144,8 @@ def reconcile(user_id):
         },
         "by_type": dict(sorted(by_type.items())),
         "risk_by_type": {k: str(v) for k, v in sorted(risk_by_type.items())},
+        "by_severity": {k: by_severity.get(k, 0) for k in SEVERITY_ORDER},
+        "risk_by_severity": {k: str(risk_by_severity.get(k, Decimal("0.00"))) for k in SEVERITY_ORDER},
         "rows": rows,
         "has_data": bool(orders or payments),
     }
