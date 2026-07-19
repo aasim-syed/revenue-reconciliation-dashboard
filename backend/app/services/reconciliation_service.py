@@ -101,8 +101,13 @@ def reconcile(user_id):
             if charge_total > AMOUNT_TOLERANCE:
                 rows.append(discrepancy("charged_cancelled_order", "critical", order, linked, Decimal("0.00"), payment_total, payment_total, "A cancelled order still has captured payment activity."))
         elif order["status"] in {"refunded", "returned"}:
-            if abs(payment_total) > AMOUNT_TOLERANCE:
-                rows.append(discrepancy("refund_not_balanced", "high", order, linked, Decimal("0.00"), payment_total, abs(payment_total), "A refunded order does not net to zero in the payment processor."))
+            mismatched_currency = [p for p in linked if p["currency"] != order["currency"]]
+            if mismatched_currency:
+                rows.append(discrepancy("currency_mismatch", "critical", order, linked, Decimal("0.00"), payment_total, abs(payment_total), "The order and refund/charge currencies differ."))
+            elif payment_total > AMOUNT_TOLERANCE:
+                rows.append(discrepancy("partially_refunded", "high", order, linked, Decimal("0.00"), payment_total, payment_total, "A refunded order still has unreturned charge value in the payment processor."))
+            elif payment_total < -AMOUNT_TOLERANCE:
+                rows.append(discrepancy("over_refunded", "high", order, linked, Decimal("0.00"), payment_total, abs(payment_total), "A refunded order was refunded for more than it was originally charged."))
         else:
             # Any status outside the recognized set (completed/cancelled/canceled/refunded/returned)
             # is flagged rather than silently skipped, so an unfamiliar export value can't make an

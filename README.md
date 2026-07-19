@@ -141,7 +141,8 @@ Discrepancy types implemented:
 - `duplicate_charge`: multiple settled charges point to one order.
 - `currency_mismatch`: order and payment currencies differ.
 - `charged_cancelled_order`: cancelled order has captured payment activity.
-- `refund_not_balanced`: refunded or returned order does not net to zero.
+- `partially_refunded`: refunded or returned order still has unreturned charge value outstanding.
+- `over_refunded`: refunded or returned order was refunded for more than it was charged.
 - `orphan_payment`: payment references an order missing from the order export.
 - `orphan_refund`: refund references an order missing from the order export.
 - `duplicate_order_id`: order export contains repeated order IDs.
@@ -171,7 +172,7 @@ Breakdown by type:
 - `missing_payment`: 4 issues, `$392.35` at risk.
 - `orphan_payment`: 3 issues, `$308.00` at risk.
 - `overpaid`: 2 issues, `$85.00` at risk.
-- `refund_not_balanced`: 1 issue, `$120.00` at risk.
+- `partially_refunded`: 1 issue, `$120.00` at risk.
 - `underpaid`: 3 issues, `$117.52` at risk.
 - `unsettled_payment`: 2 issues, `$377.00` at risk.
 

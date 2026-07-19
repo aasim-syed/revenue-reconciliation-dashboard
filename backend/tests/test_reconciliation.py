@@ -102,10 +102,33 @@ def test_cancelled_order_with_no_charge_is_clean(user_id):
     assert result["rows"] == []
 
 
-def test_refund_not_balanced(user_id):
-    # A charge with no offsetting refund on a refunded order should not net to zero.
+def test_partially_refunded(user_id):
+    # A charge with no offsetting refund on a refunded order still holds unreturned value.
     result = _seed(user_id, [order("ORD-1", "0.00", status="refunded")], [payment("TXN-1", "ORD-1", "40.00")])
-    assert result["rows"][0]["type"] == "refund_not_balanced"
+    assert result["rows"][0]["type"] == "partially_refunded"
+    assert result["rows"][0]["amount_at_risk"] == "40.00"
+
+
+def test_partially_refunded_with_partial_refund_issued(user_id):
+    # Charged 100, only 30 refunded back -- 70 is still outstanding.
+    result = _seed(
+        user_id,
+        [order("ORD-1", "0.00", status="refunded")],
+        [payment("TXN-1", "ORD-1", "100.00"), payment("TXN-2", "ORD-1", "30.00", ptype="refund")],
+    )
+    assert result["rows"][0]["type"] == "partially_refunded"
+    assert result["rows"][0]["amount_at_risk"] == "70.00"
+
+
+def test_over_refunded(user_id):
+    # Refunded more than was ever charged.
+    result = _seed(
+        user_id,
+        [order("ORD-1", "0.00", status="refunded")],
+        [payment("TXN-1", "ORD-1", "40.00"), payment("TXN-2", "ORD-1", "55.00", ptype="refund")],
+    )
+    assert result["rows"][0]["type"] == "over_refunded"
+    assert result["rows"][0]["amount_at_risk"] == "15.00"
 
 
 def test_refunded_order_that_nets_to_zero_is_clean(user_id):
@@ -113,6 +136,44 @@ def test_refunded_order_that_nets_to_zero_is_clean(user_id):
         user_id,
         [order("ORD-1", "0.00", status="refunded")],
         [payment("TXN-1", "ORD-1", "40.00"), payment("TXN-2", "ORD-1", "40.00", ptype="refund")],
+    )
+    assert result["rows"] == []
+
+
+def test_refund_amount_tolerance_boundary(user_id):
+    # 1 cent short of a full refund is within the $0.01 tolerance and stays clean.
+    within_tolerance = _seed(
+        user_id,
+        [order("ORD-1", "0.00", status="refunded")],
+        [payment("TXN-1", "ORD-1", "40.00"), payment("TXN-2", "ORD-1", "39.99", ptype="refund")],
+    )
+    assert within_tolerance["rows"] == []
+
+    over_tolerance = _seed(
+        user_id,
+        [order("ORD-2", "0.00", status="refunded")],
+        [payment("TXN-3", "ORD-2", "40.00"), payment("TXN-4", "ORD-2", "39.98", ptype="refund")],
+    )
+    assert [r["type"] for r in over_tolerance["rows"]] == ["partially_refunded"]
+
+
+def test_refund_currency_mismatch(user_id):
+    # The refund was settled in a different currency than the order was placed in.
+    result = _seed(
+        user_id,
+        [order("ORD-1", "0.00", status="refunded", currency="USD")],
+        [payment("TXN-1", "ORD-1", "40.00"), payment("TXN-2", "ORD-1", "40.00", ptype="refund", currency="EUR")],
+    )
+    assert result["rows"][0]["type"] == "currency_mismatch"
+
+
+def test_refund_matches_order_with_normalized_id(user_id):
+    # order_id/order_reference are upper-cased and stripped on import, so a refund
+    # referencing "  ord-1  " should still match order "ORD-1".
+    result = _seed(
+        user_id,
+        [order("ORD-1", "0.00", status="refunded")],
+        [payment("TXN-1", "  ord-1  ", "40.00"), payment("TXN-2", " Ord-1", "40.00", ptype="refund")],
     )
     assert result["rows"] == []
 
@@ -138,6 +199,21 @@ def test_duplicate_transaction_ref(user_id):
         user_id,
         [order("ORD-1", "50.00"), order("ORD-2", "50.00")],
         [payment("TXN-DUP", "ORD-1", "50.00"), payment("TXN-DUP", "ORD-2", "50.00")],
+    )
+    assert "duplicate_transaction_ref" in [r["type"] for r in result["rows"]]
+
+
+def test_duplicate_refund_transaction_ref(user_id):
+    # The same refund transaction reference shows up against two different orders.
+    result = _seed(
+        user_id,
+        [order("ORD-1", "0.00", status="refunded"), order("ORD-2", "0.00", status="refunded")],
+        [
+            payment("TXN-1", "ORD-1", "40.00"),
+            payment("TXN-2", "ORD-2", "40.00"),
+            payment("TXN-DUP-R", "ORD-1", "40.00", ptype="refund"),
+            payment("TXN-DUP-R", "ORD-2", "40.00", ptype="refund"),
+        ],
     )
     assert "duplicate_transaction_ref" in [r["type"] for r in result["rows"]]
 
